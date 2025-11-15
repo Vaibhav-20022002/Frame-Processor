@@ -1,0 +1,157 @@
+{
+  "global_settings": {
+    "log_level": "DEBUG"
+  },
+  "streams": [
+    {
+      "id": 1,
+      "url": "rtsp://",
+      "wait_for_keyframe": false,
+      "enabled": true,
+      "processing": {
+        "crop": {
+          "x": 600,
+          "y": 337,
+          "width": 80,
+          "height": 45
+        },
+        "scale": {
+          "width": 3840,
+          "height": 2160
+        }
+      },
+      "events": [
+        {
+          "name": "person_analytics",
+          "target_fps": 1.0,
+          "batch_size": 2
+        },
+        {
+          "name": "crowd_detection",
+          "target_fps": 2.0,
+          "batch_size": 30
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "url": "rtsp://",
+      "wait_for_keyframe": false,
+      "enabled": true,
+      "processing": {
+        "crop": {
+          "x": 40,
+          "y": 10,
+          "width": 1200,
+          "height": 700
+        },
+        "scale": {
+          "width": 64,
+          "height": 36
+        }
+      },
+      "events": [
+        {
+          "name": "queue_detection",
+          "target_fps": 5.0,
+          "batch_size": 10
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "url": "rtsp://",
+      "wait_for_keyframe": false,
+      "enabled": true,
+      "processing": {
+        "crop": {
+          "x": 900,
+          "y": 400,
+          "width": 200,
+          "height": 150
+        },
+        "scale": {
+          "width": 3001,
+          "height": 2001
+        }
+      },
+      "events": [
+        {
+          "name": "person_analytics",
+          "target_fps": 1.0,
+          "batch_size": 2
+        },
+        {
+          "name": "fire_detection",
+          "target_fps": 0.5,
+          "batch_size": 4
+        },
+        {
+          "name": "crowd_detection",
+          "target_fps": 1.0,
+          "batch_size": 5
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "url": "rtsp://",
+      "wait_for_keyframe": false,
+      "enabled": true,
+      "processing": {
+        "crop": {
+          "x": 240,
+          "y": 1,
+          "width": 1040,
+          "height": 719
+        },
+        "scale": {
+          "width": 853,
+          "height": 479
+        }
+      },
+      "events": [
+        {
+          "name": "animal_intrusion",
+          "target_fps": 1.5,
+          "batch_size": 2
+        },
+        {
+          "name": "wall_detection",
+          "target_fps": 2,
+          "batch_size": 4
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "url": "rtsp://",
+      "wait_for_keyframe": false,
+      "enabled": true,
+      "processing": {
+        "crop": {
+          "x": 50,
+          "y": 10,
+          "width": 1200,
+          "height": 700
+        },
+        "scale": {
+          "width": 123,
+          "height": 456
+        }
+      },
+      "events": [
+        {
+          "name": "person_analytics",
+          "target_fps": 3.0,
+          "batch_size": 2
+        },
+        {
+          "name": "wall_detection",
+          "target_fps": 3.0,
+          "batch_size": 4
+        }
+      ]
+    }
+  ]
+}
