@@ -1,0 +1,53 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+*.exe
+*.out
+*.app
+*.gch
+*.pch
+*.elf
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Intermediate image data
+*.rgb
+*.mp4
+*.mkv
+*.h264
+*.jpg
+*.png
+
+# Vs code folder
+.vscode
+
+# build folder
+
+build

@@ -1,0 +1,126 @@
+# .clang-format
+
+# -------------------------------------------------------------------
+# Base style and general layout
+# -------------------------------------------------------------------
+Cpp11BracedListStyle:           true
+BasedOnStyle:                         LLVM    # start from LLVM
+IndentWidth:                          2       # 2 spaces per indent
+TabWidth:                             2       # if ever tabs allowed
+UseTab:                               Never
+ColumnLimit:                          100     # max line length; set to 0 to disable
+AllowShortIfStatementsOnASingleLine:  true
+AllowShortLoopsOnASingleLine:         true
+AllowShortFunctionsOnASingleLine:     Inline
+
+# -------------------------------------------------------------------
+# Braces and blocks
+# -------------------------------------------------------------------
+BreakBeforeBraces:          Attach          # place { on same line
+BraceWrapping:
+  AfterClass:               false
+  AfterControlStatement:    false
+  AfterEnum:                false
+  AfterFunction:            false
+  AfterNamespace:           false
+  AfterObjCDeclaration:     false
+  AfterStruct:              false
+  AfterUnion:               false
+  BeforeCatch:              false
+  BeforeElse:               false
+  IndentBraces:             false
+
+# -------------------------------------------------------------------
+# Indentation nuances
+# -------------------------------------------------------------------
+IndentCaseLabels:        true      # K&R indents switch cases same as code
+IndentGotoLabels:        false
+IndentPPDirectives:      None      # or 'AfterHash'
+ContinuationIndentWidth: 8         # indent for continuations
+
+# -------------------------------------------------------------------
+# Spaces — around operators, after keywords, inside parens
+# -------------------------------------------------------------------
+SpaceBeforeParens:                ControlStatements    # `if (` not `if(`
+SpaceInEmptyParentheses:          false
+SpacesInParens:                   Custom
+SpacesInParensOptions:
+  InConditionalStatements: false
+  InCStyleCasts:           false
+  InEmptyParentheses:      false
+  Other:                   false
+SpacesInAngles:                   false
+SpacesInCStyleCastParentheses:    false
+SpacesInContainerLiterals:        false
+SpacesInConditionalStatement:     true                 # `a ? b : c`
+SpacesInSquareBrackets:           false
+SpaceBeforeAssignmentOperators:   true
+SpaceAfterCStyleCast:             false
+SpaceBeforeCtorInitializerColon:  false
+SpaceAfterTemplateKeyword:        false
+PointerAlignment:                 Right               # `int* p` vs `int *p`
+
+# -------------------------------------------------------------------
+# Alignment — when to align things into columns
+# -------------------------------------------------------------------
+AlignConsecutiveAssignments:    true
+AlignConsecutiveDeclarations:   true
+AlignConsecutiveMacros:         Consecutive
+AlignEscapedNewlines:           Left
+AlignOperands:                  false
+AlignTrailingComments:          true
+AlignAfterOpenBracket:          DontAlign
+
+# -------------------------------------------------------------------
+# Wrapping and breaking long constructs
+# -------------------------------------------------------------------
+AllowAllParametersOfDeclarationOnNextLine:  false
+AllowShortBlocksOnASingleLine:              false
+BinPackParameters:                          false
+BinPackArguments:                           false
+BreakConstructorInitializers:               BeforeComma
+ConstructorInitializerIndentWidth:          4
+PenaltyBreakBeforeFirstCallParameter:       19
+PenaltyBreakComment:                        300
+PenaltyBreakString:                         1000
+PenaltyExcessCharacter:                     100
+PenaltyReturnTypeOnItsOwnLine:              60
+
+# -------------------------------------------------------------------
+# C++ specific
+# -------------------------------------------------------------------
+DerivePointerAlignment:                     false
+# ExperimentalAutoDetectBinPackedArguments:   false
+IncludeBlocks:                              Regroup
+IncludeCategories:
+  - Regex:           '^<.*\.h>'
+    Priority:        1
+  - Regex:           '^".*\.h"'
+    Priority:        2
+SortIncludes:                               true
+Standard:                                   Latest
+
+# -------------------------------------------------------------------
+# Other languages / files
+# -------------------------------------------------------------------
+Language:            Cpp
+SortUsingDeclarations: false
+
+# -------------------------------------------------------------------
+# Miscellaneous
+# -------------------------------------------------------------------
+ReflowComments:                 true
+CommentPragmas:                 '^ IWYU pragma:'
+MaxEmptyLinesToKeep:            1
+EmptyLineBeforeAccessModifier:  Leave
+
+# -------------------------------------------------------------------
+# Example overrides for specific files
+# -------------------------------------------------------------------
+# For C files, you might want .clang-format to detect C
+# and use C11 standard:
+# ---
+# FileName:           '*.c'
+# Language:           C
+# Standard:           C11
+# ---

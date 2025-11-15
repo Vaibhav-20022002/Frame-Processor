@@ -1,0 +1,9 @@
+# Ignore the CMake build directory
+build/
+
+# Ignore IDE-specific folders
+.vscode/
+.idea/
+
+# Ignore temporary files
+*.swp

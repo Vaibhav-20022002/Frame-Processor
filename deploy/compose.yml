@@ -1,0 +1,30 @@
+services:
+  fp_v1:
+    container_name: "FP"
+    image: "frame_processor:v1"
+    build: ".."
+    env_file:
+      - ../config/fp.env
+    # entrypoint: "sleep infinity" # Use for debug
+    deploy: # Use for runtime and efficiency testing
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2.0G
+        reservations:
+          cpus: "0.5"
+          memory: 100M
+    networks:
+      - frame_processor_net
+
+  redis:
+    container_name: "Redis_FP_V1"
+    image: "redis:latest"
+    ports:
+      - "63799:6379"
+    networks:
+      - frame_processor_net
+
+networks:
+  frame_processor_net:
+    driver: bridge
