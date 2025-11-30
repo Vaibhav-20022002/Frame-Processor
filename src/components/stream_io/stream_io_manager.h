@@ -17,14 +17,14 @@ public:
    * @brief Constructs a new StreamIoManager instance
    *
    * @details Initializes the stream manager with:
-   * - A shared frame queue for passing decoded frames downstream
-   * - FFmpeg logging configuration
-   * - Empty initial stream configuration
+   *          - A shared frame queue for passing decoded frames downstream
+   *          - FFmpeg logging configuration
+   *          - Empty initial stream configuration
    *
    * The manager is designed to handle:
-   * - Dynamic stream configuration updates
-   * - Thread-safe frame delivery
-   * - Graceful stream lifecycle management
+   *          - Dynamic stream configuration updates
+   *          - Thread-safe frame delivery
+   *          - Graceful stream lifecycle management
    *
    * @param decoded_frame_queue Shared queue for passing decoded frames to processors
    */
@@ -33,10 +33,10 @@ public:
   /**
    * @brief Destroys the StreamIoManager, ensuring clean shutdown
    *
-   * Calls stop_all() to ensure:
-   * - All stream threads are terminated gracefully
-   * - Resources are properly freed
-   * - No memory leaks from FFmpeg contexts
+   * @note Calls stop_all() to ensure:
+   *       - All stream threads are terminated gracefully
+   *       - Resources are properly freed
+   *       - No memory leaks from FFmpeg contexts
    */
   ~StreamIoManager();
 
@@ -44,16 +44,16 @@ public:
    * @brief Updates the set of active streams based on new configuration
    *
    * @details This method handles the dynamic reconfiguration of streams by:
-   * 1. Identifying streams to add, remove, or update
-   * 2. Gracefully stopping removed/changed streams
-   * 3. Starting new streams with fresh configurations
-   * 4. Managing thread lifecycle for each stream
+   *          - Identifying streams to add, remove, or update
+   *          - Gracefully stopping removed/changed streams
+   *          - Starting new streams with fresh configurations
+   *          - Managing thread lifecycle for each stream
    *
    * The update process ensures:
-   * - No interruption of active streams that haven't changed
-   * - Clean shutdown of removed/changed streams
-   * - Proper initialization of new streams
-   * - Thread-safe state transitions
+   *          - No interruption of active streams that haven't changed
+   *          - Clean shutdown of removed/changed streams
+   *          - Proper initialization of new streams
+   *          - Thread-safe state transitions
    *
    * @param new_configs Vector of stream configurations to apply
    *
@@ -68,30 +68,30 @@ private:
    * @brief Main processing loop for a single video stream
    *
    * @details This method implements the core streaming functionality:
-   * 1. Stream Connection and Setup:
-   *    - Opens RTSP connection with configurable timeout
-   *    - Initializes FFmpeg demuxer and decoder
-   *    - Sets up FPS control filter graph
+   *          - Stream Connection and Setup:
+   *            - Opens RTSP connection with configurable timeout
+   *            - Initializes FFmpeg demuxer and decoder
+   *            - Sets up FPS control filter graph
    *
-   * 2. Frame Processing Pipeline:
-   *    - Reads network packets
-   *    - Decodes video frames
-   *    - Controls frame rate
-   *    - Pushes frames to shared queue
+   *          - Frame Processing Pipeline:
+   *            - Reads network packets
+   *            - Decodes video frames
+   *            - Controls frame rate
+   *            - Pushes frames to shared queue
    *
-   * 3. Error Handling and Recovery:
-   *    - Handles network timeouts
-   *    - Manages decoder errors
-   *    - Ensures proper resource cleanup
+   *          - Error Handling and Recovery:
+   *            - Handles network timeouts
+   *            - Manages decoder errors
+   *            - Ensures proper resource cleanup
    *
    * @param config Configuration for this stream (URL, FPS, etc.)
    * @param st Stop token for cooperative thread shutdown
    *
    * @note This method runs in its own thread and manages its own lifecycle.
-   *       It will continue processing until either:
-   *       - The stop token is triggered
-   *       - A fatal error occurs
-   *       - The stream ends (for non-live streams)
+   *       It will continue processing until one of the following occurs:
+   *       - The stop token is triggered (cooperative shutdown)
+   *       - A fatal error occurs (the thread will exit and the manager may restart)
+   *       - The stream ends (for non-live inputs)
    */
   void run_stream(StreamConfig config, std::stop_token st);
 

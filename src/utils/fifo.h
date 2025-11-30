@@ -1,6 +1,6 @@
 /**
  * @file fifo.h
- * @brief Defines a simple, blocking, thread-safe queue
+ * @brief Defines a simple, blocking, thread-safe queue.
  */
 #pragma once
 #include <condition_variable>
@@ -23,7 +23,7 @@ public:
   /**
    * @brief Waits until an item is available or the queue is stopped.
    * @return An std::optional containing the item, or std::nullopt if the
-   * queue is stopped and empty.
+   *         queue is stopped and empty.
    */
   std::optional<T> wait_and_pop() {
     std::unique_lock lock(mtx_);

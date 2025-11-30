@@ -20,6 +20,7 @@ public:
    * @brief Constructs and establishes a connection to the Redis server.
    * @param host The hostname or IP of the Redis server.
    * @param port The port number of the Redis server.
+   * @details Attempts to create a hiredis connection and logs any errors.
    */
   RedisConnection(const std::string &host, int port) {
     context_ = redisConnect(host.c_str(), port);
@@ -38,6 +39,7 @@ public:
 
   /**
    * @brief Destructor. Frees the Redis context if it's valid.
+   * @details Calls `redisFree` if a context was successfully allocated.
    */
   ~RedisConnection() {
     if (context_) {

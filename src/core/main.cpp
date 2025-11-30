@@ -1,11 +1,10 @@
 /**
  * @file main.cpp
- * @brief Main entry point, handling process management and app lifecycle.
+ * @brief Application entry and supervisor logic.
  *
- * @details This file contains the complete logic for the app's startup. It forks into a parent
- * (monitor) and child (worker) process. The parent's sole job is to relaunch the child if it
- * crashes. The child process runs the core app, setting up all components and handling graceful
- * shutdown.
+ * @details Implements a supervisor pattern: the parent process monitors the child
+ *          worker process and restarts it on failure. The child executes the main application
+ *          logic (component initialization, thread startup, and graceful shutdown).
  */
 
 #include <csignal>
@@ -48,7 +47,7 @@ void child_signal_handler(int /*signum*/) {
 void parent_signal_handler(int signum) {
   g_parent_shutdown_request = 1;
 
-  // Forward signal to child if it exists
+  /// Forward signal to child if it exists
   if (g_child_pid > 0) {
     kill(g_child_pid, signum);
   }
@@ -85,7 +84,7 @@ int get_worker_count() {
 int app_logic() {
   INFO_MSG("App child process started (PID: {}).", getpid());
 
-  // Set up child-specific signal handlers
+  /// Set up child-specific signal handlers
   signal(SIGINT, child_signal_handler);
   signal(SIGTERM, child_signal_handler);
 
@@ -139,7 +138,7 @@ int app_logic() {
  * @brief The app's main entry point
  */
 int main() {
-  // Set up parent signal handlers
+  /// Set up parent signal handlers
   signal(SIGINT, parent_signal_handler);
   signal(SIGTERM, parent_signal_handler);
 
@@ -151,7 +150,7 @@ int main() {
   }
 
   if (pid == 0) {
-    // Child process - reset signal handlers to avoid inheritance issues
+    /// Child process - reset signal handlers to avoid inheritance issues
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     _exit(app_logic());
@@ -165,22 +164,22 @@ int main() {
       pid_t res = waitpid(pid, &status, WNOHANG);
 
       if (res == 0) {
-        // Child still running
+        /// Child still running
         std::this_thread::sleep_for(2s);
       } else if (res == pid) {
-        // Child terminated
+        /// Child terminated
         if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
           INFO_MSG("Child process exited normally. Exiting...");
           break;
         }
 
-        // Check if parent received shutdown signal
+        /// Check if parent received shutdown signal
         if (g_parent_shutdown_request) {
           INFO_MSG("Parent shutdown requested. Exiting...");
           break;
         }
 
-        // Log termination reason and relaunch
+        /// Log termination reason and relaunch
         if (WIFEXITED(status)) {
           ERROR_MSG("Child exited with code {}. Relaunching...", WEXITSTATUS(status));
         } else if (WIFSIGNALED(status)) {
@@ -189,10 +188,10 @@ int main() {
           ERROR_MSG("Child terminated unexpectedly. Relaunching...");
         }
 
-        // Fork new child
+        /// Fork new child
         pid = fork();
         if (pid == 0) {
-          // Reset signal handlers for new child
+          /// Reset signal handlers for new child
           signal(SIGINT, SIG_DFL);
           signal(SIGTERM, SIG_DFL);
           _exit(app_logic());
@@ -204,9 +203,9 @@ int main() {
           break;
         }
       } else if (res < 0) {
-        // waitpid failed
+        //// waitpid failed
         if (errno == EINTR) {
-          // Interrupted by signal, continue loop
+          /// Interrupted by signal, continue loop
           continue;
         }
         FAIL_MSG("waitpid failed with error: {}. Exiting...", strerror(errno));
@@ -214,23 +213,23 @@ int main() {
       }
     }
 
-    // Clean up child process if still running
+    /// Clean up child process if still running
     if (g_child_pid > 0) {
       INFO_MSG("Terminating child process (PID: {})...", g_child_pid);
       kill(g_child_pid, SIGTERM);
 
-      // Wait up to 5 seconds for graceful shutdown
+      /// Wait up to 5 seconds for graceful shutdown
       for (int i = 0; i < 5 && kill(g_child_pid, 0) == 0; ++i) {
         std::this_thread::sleep_for(1s);
       }
 
-      // Force kill if still alive
+      /// Force kill if still alive
       if (kill(g_child_pid, 0) == 0) {
         INFO_MSG("Child didn't terminate gracefully, sending SIGKILL...");
         kill(g_child_pid, SIGKILL);
       }
 
-      // Final wait to avoid zombie
+      /// Final wait to avoid zombie
       waitpid(g_child_pid, nullptr, 0);
     }
   }

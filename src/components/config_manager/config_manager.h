@@ -1,6 +1,11 @@
 /**
  * @file config_manager.h
- * @brief Defines the ConfigManager class for handling dynamic configuration.
+ * @brief ConfigManager: dynamic configuration loader and reloader.
+ *
+ * @details Reads configuration from a local JSON file and optionally polls a
+ *          remote API. Exposes a thread-safe API to load the initial configuration and
+ *          to start a background reloader that notifies the application via a callback
+ *          when the configuration changes.
  */
 #pragma once
 #include <chrono>
@@ -25,8 +30,8 @@ public:
   using OnUpdateCallback = std::function<void(const GlobalConfig &)>;
 
   /**
-   * @brief Constructs the ConfigManager
-   * @note Reads env variables to determine the behavior
+   * @brief Constructs the ConfigManager.
+   * @note Reads environment variables to determine default paths and reload interval.
    */
   ConfigManager();
   ~ConfigManager();
@@ -34,7 +39,7 @@ public:
   /**
    * @brief Loads the initial configuration from the specified file path.
    * @return `true` if the initial configuration was successfully loaded and parsed, `false`
-   * otherwise.
+   *         otherwise.
    * @note On failure, an error is logged.
    */
   bool load_initial_config();
@@ -72,7 +77,7 @@ private:
    * @brief Parses the local JSON config file into a `GlobalConfig` struct.
    * @param[out] config_out The struct to be populated with the parsed configuration data.
    * @return `true` on successful parsing, `false` if a critical error occurs (e.g.,
-   * file not found or completely invalid JSON).
+   *         file not found or completely invalid JSON).
    * @note This function is `const` because it does not modify the state of the ConfigManager.
    */
   bool parse_config_json(GlobalConfig &configs_out) const;

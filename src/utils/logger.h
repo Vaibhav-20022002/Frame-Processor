@@ -1,14 +1,13 @@
 /**
- * @brief logger.h
+ * @file logger.h
+ * @brief Macro-based logging utility with a runtime-configurable log level.
  *
- * @brief Defines a runtime-configuration, macro-based logging utility.
- * @details This logger uses a global atomic log level that can be changed at runtime.
- *          Log macros perform a quick check against this level before formatting, making
- *          disabled log calls very cheap.
+ * @details Provides lightweight logging macros (FAIL/ERROR/WARN/INFO/DEBUG) that
+ *          check a global atomic `G_LOG_LEVEL` before formatting to keep disabled calls cheap.
  *
  * @example
- * INFO_MSG("This is an info message with a number: {}", 123);
- * ERROR_MSG("Something went wrong with error code: {}", err_code);
+ *          INFO_MSG("This is an info message with a number: {}", 123);
+ *          ERROR_MSG("Something went wrong with error code: {}", err_code);
  */
 #pragma once
 
@@ -25,7 +24,7 @@
  */
 enum class LogLevel { FAIL = 0, ERROR = 1, WARN = 2, INFO = 3, DEBUG = 4 };
 
-// GLOBAL thread-safe log-level for the whole app
+/// GLOBAL thread-safe log-level for the whole app
 extern std::atomic<LogLevel> G_LOG_LEVEL;
 
 /**
@@ -54,13 +53,13 @@ void _log_print(FILE    *stream,
           level_str,
           file,
           line);
-  // fmt::print supports compile-time format objects as well as runtime strings
+  /// fmt::print supports compile-time format objects as well as runtime strings
   fmt::print(stream, format, std::forward<Args>(args)...);
   fmt::print(stream, "\n");
   fflush(stream);
 }
 
-// Use .load() on the atomic, and accept standard __VA_ARGS__ style.
+/// Use .load() on the atomic, and accept standard __VA_ARGS__ style.
 #define FAIL_MSG(fmt, ...)                                                             \
   do {                                                                                 \
     if (G_LOG_LEVEL.load() >= LogLevel::FAIL)                                          \

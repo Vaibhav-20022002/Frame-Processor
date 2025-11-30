@@ -103,7 +103,7 @@ using UniqueAVFilterGraph = std::unique_ptr<AVFilterGraph, AVFilterGraphDeleter>
 
 /**
  * @struct ScaleConfig
- * @brief Hold the values used during SCALING the frame during processing
+ * @brief Holds parameters used for scaling frames during processing.
  */
 struct ScaleConfig {
   int  width  = 0;
@@ -113,7 +113,7 @@ struct ScaleConfig {
 
 /**
  * @struct CropConfig
- * @brief Hold the value used during CROPPING the frame during processing
+ * @brief Holds parameters used for cropping frames during processing.
  */
 struct CropConfig {
   int  x      = 0;
@@ -125,7 +125,7 @@ struct CropConfig {
 
 /**
  * @struct ProcessingConfig
- * @brief Holds `ScaleConfig` and `CropConfig` struct
+ * @brief Aggregates `ScaleConfig` and `CropConfig` settings.
  */
 struct ProcessingConfig {
   ScaleConfig scale;
