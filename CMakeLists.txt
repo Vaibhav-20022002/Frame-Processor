@@ -48,6 +48,7 @@ add_executable(frame_processor
   src/components/worker/worker.cpp
   src/components/publisher/publisher.cpp
   src/utils/logger.cpp
+  src/utils/frame_saver.cpp
   src/utils/types.cpp
 )
 
