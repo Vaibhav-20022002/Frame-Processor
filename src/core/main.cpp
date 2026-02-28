@@ -104,8 +104,10 @@ int app_logic() {
 
   const size_t queue_warning_threshold = std::stoi(get_env("FP_QUEUE_WARNING_THRESHOLD", "1000"));
 
-  auto decode_frame_queue    = std::make_shared<fifo<DecodedFrame>>(queue_warning_threshold, "decode_frame_queue");
-  auto processed_frame_queue = std::make_shared<fifo<DecodedFrame>>(queue_warning_threshold, "processed_frame_queue");
+  auto decode_frame_queue =
+          std::make_shared<fifo<DecodedFrame>>(queue_warning_threshold, "decode_frame_queue");
+  auto processed_frame_queue =
+          std::make_shared<fifo<DecodedFrame>>(queue_warning_threshold, "processed_frame_queue");
 
   auto stream_manager = std::make_unique<StreamIoManager>(decode_frame_queue);
   auto worker_manager =

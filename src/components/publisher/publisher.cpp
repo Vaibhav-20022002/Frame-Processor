@@ -116,8 +116,9 @@ static void copy_plane_remove_stride(uint8_t *dest,
 
 Publisher::Publisher(std::shared_ptr<fifo<DecodedFrame>> frame_queue)
     : processed_frame_queue_(std::move(frame_queue))
-    , batch_queue_(std::stoi(get_env("FP_QUEUE_WARNING_THRESHOLD", "1000")), "publisher_batch_queue") {
-  redis_host_ = get_env("FP_REDIS_HOST", "");
+    , batch_queue_(std::stoi(get_env("FP_QUEUE_WARNING_THRESHOLD", "1000")),
+              "publisher_batch_queue") {
+  redis_host_     = get_env("FP_REDIS_HOST", "");
   int num_threads = std::stoi(get_env("FP_PUBLISHER_THREADS", "4"));
   if (redis_host_.empty()) {
     WARN_MSG("FP_REDIS_HOST not set. Publisher is DISABLED.");
