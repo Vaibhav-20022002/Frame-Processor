@@ -11,35 +11,49 @@
 
 /**
  * @class RedisConnection
- * @brief A thread-safe RAII wrapper for a hiredis connection.
- * @details Ensures redisFree is called automatically when the object goes out of scope.
+ * @brief A resource-safe wrapper for a hiredis connection.
+ * @attention This class implements the RAII idiom for `redisContext`.
+ *
+ * - `Constructor`: Connects to Redis.
+ *
+ * - `Destructor`: Calls `redisFree`.
+ *
+ * - `Move-Only`: Cannot be copied (connections are unique resources), but can be moved.
+ *
+ * @warning This class is `NOT` thread-safe. Do not share a single instance across threads
+ *          without external synchronization. In `Publisher`, this is handled by `connection_pool_`
+ *          and `pool_mutex_`.
  */
 class RedisConnection {
 public:
   /**
-   * @brief Constructs and establishes a connection to the Redis server.
-   * @param host The hostname or IP of the Redis server.
-   * @param port The port number of the Redis server.
-   * @details Attempts to create a hiredis connection and logs any errors.
+   * @brief Establishes a new TCP connection to Redis.
+   * @param host Redis server hostname or IP.
+   * @param port Redis server port.
    */
   RedisConnection(const std::string &host, int port) {
-    context_ = redisConnect(host.c_str(), port);
+    struct timeval timeout = {2, 0}; //< 2 seconds timeout
+    context_               = redisConnectWithTimeout(host.c_str(), port, timeout);
+
     if (context_ == nullptr || context_->err) {
       if (context_) {
         ERROR_MSG("Redis connection error: {}", context_->errstr);
         redisFree(context_);
         context_ = nullptr;
       } else {
-        FAIL_MSG("Could not allocate redis context.");
+        ERROR_MSG("Fatal: Could not allocate redis context.");
       }
     } else {
+      /// Set the same timeout for operations (commands)
+      if (redisSetTimeout(context_, timeout) != REDIS_OK) {
+        WARN_MSG("Failed to set Redis operation timeout for {}:{}.", host, port);
+      }
       INFO_MSG("Successfully connected to Redis at {}:{}.", host, port);
     }
   }
 
   /**
-   * @brief Destructor. Frees the Redis context if it's valid.
-   * @details Calls `redisFree` if a context was successfully allocated.
+   * @brief Destructor. Automatically closes the connection.
    */
   ~RedisConnection() {
     if (context_) {
@@ -47,11 +61,11 @@ public:
     }
   }
 
-  /// Disable copy semantics
+  /// Disable copy semantics (a connection cannot be duplicated easily)
   RedisConnection(const RedisConnection &)            = delete;
   RedisConnection &operator=(const RedisConnection &) = delete;
 
-  /// Enable move semantics
+  /// Enable move semantics (transfer ownership of the connection)
   RedisConnection(RedisConnection &&other) noexcept
       : context_(other.context_) {
     other.context_ = nullptr;
@@ -66,14 +80,14 @@ public:
   }
 
   /**
-   * @brief Checks if the connection is valid.
-   * @return True if connected, false otherwise.
+   * @brief Checks if the underlying context is allocated.
+   * @note This does not strictly guarantee the socket is still open (keepalives/timeouts),
+   *       but it ensures the pointer is valid for use.
    */
   bool is_valid() const { return context_ != nullptr; }
 
   /**
-   * @brief Provides access to the raw hiredis context pointer.
-   * @return The raw `redisContext*` handle.
+   * @brief Returns the raw hiredis context for executing commands.
    */
   redisContext *get() const { return context_; }
 

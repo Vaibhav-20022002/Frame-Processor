@@ -1,13 +1,16 @@
 /**
  * @file logger.cpp
- * @brief Implements the global logger variable and helper functions.
+ * @brief Implements the global logger variables and helper functions.
  */
 #include "logger.h"
 
+#include <mutex>
 #include <string>
 
-// Initialize the global log level. Default to INFO
+/// Initialize the global log level. Default to INFO
 std::atomic<LogLevel> G_LOG_LEVEL{LogLevel::INFO};
+
+
 
 LogLevel string_to_loglevel(const std::string &level_str) {
   if (level_str.empty()) return LogLevel::INFO;
