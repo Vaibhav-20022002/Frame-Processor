@@ -15,6 +15,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <unordered_set>
 
 #include "utils/types.h"
 
@@ -82,10 +83,39 @@ private:
    */
   bool parse_config_json(GlobalConfig &configs_out) const;
 
+  /**
+   * @brief Determines if this instance owns a stream based on consistent hashing.
+   * @param stream_id The stream ID to check
+   * @return True if this instance should process the stream
+   */
+  bool owns_stream(long long stream_id) const {
+    if (total_instances_ <= 1) return true; //< Single instance mode
+    return (stream_id % total_instances_) == (instance_slot_ % total_instances_);
+  }
+
+  /**
+   * @brief Checks if a stream should be processed based on whitelist.
+   * @param stream_id The ID to check
+   * @return True if stream should be processed (whitelist empty or ID in whitelist)
+   */
+  bool is_stream_whitelisted(long long stream_id) const {
+    if (!has_stream_whitelist_) return true; //< No whitelist = allow all
+    return stream_id_whitelist_.count(stream_id) > 0;
+  }
+
   std::string          config_path_;
   std::string          api_url_;
   std::chrono::seconds reload_interval_{RELOAD_INTERVAL_CONFIG_API_S};
   GlobalConfig         current_config_;
+
+  /// Horizontal Scaling (consistent hashing)
+  int instance_slot_;   //< 0-indexed instance slot (from FP_INSTANCE_SLOT)
+  int total_instances_; //< Total replica count (from FP_TOTAL_INSTANCES)
+  int max_streams_;     //< Max streams per instance (0 = unlimited)
+
+  /// Stream ID whitelist filtering (FP_STREAM_IDS)
+  std::unordered_set<long long> stream_id_whitelist_; //< Set of allowed stream IDs (empty = all)
+  bool has_stream_whitelist_ = false;                 //< True if FP_STREAM_IDS was explicitly set
 
   mutable std::mutex config_mutex_;
   OnUpdateCallback   on_update_callback_;

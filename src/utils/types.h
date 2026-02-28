@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #ifdef __linux__
@@ -94,10 +95,33 @@ using UniqueAVCodecContext = std::unique_ptr<AVCodecContext, AVCodecContextDelet
 using UniqueAVFormatContext = std::unique_ptr<AVFormatContext, AVFormatContextCloseInputDeleter>;
 
 /**
+ * @struct SwsContextDeleter
+ * @brief Custom deleter for `SwsContext`.
+ */
+struct SwsContextDeleter {
+  void operator()(SwsContext *s) const;
+};
+
+/**
+ * @struct AVCodecParserContextDeleter
+ * @brief Custom deleter for `AVCodecParserContext`.
+ */
+struct AVCodecParserContextDeleter {
+  void operator()(struct AVCodecParserContext *p) const;
+};
+
+/**
  * @typedef UniqueAVFilterGraph
  * @brief RAII wrapper for `AVFilterGraph`
  */
 using UniqueAVFilterGraph = std::unique_ptr<AVFilterGraph, AVFilterGraphDeleter>;
+
+/** @typedef UniqueSwsContext @brief RAII wrapper for `SwsContext` */
+using UniqueSwsContext = std::unique_ptr<SwsContext, SwsContextDeleter>;
+
+/** @typedef UniqueAVCodecParserContext @brief RAII wrapper for `AVCodecParserContext` */
+using UniqueAVCodecParserContext =
+        std::unique_ptr<struct AVCodecParserContext, AVCodecParserContextDeleter>;
 
 // **---------- CONFIGURATION STRUCTS ----------**
 
@@ -139,10 +163,12 @@ struct ProcessingConfig {
  * frame rate and the batch size for publishing.
  */
 struct EventConfig {
-  std::string name;
-  double      target_fps = 1.0;
-  int         batch_size = 8; //< Default batch size if not specified
-  bool        operator==(const EventConfig &other) const;
+  uint32_t         id = 0;
+  std::string      name;
+  double           target_fps = 1.0;
+  int              batch_size = 8; //< Default batch size if not specified
+  ProcessingConfig processing;
+  bool             operator==(const EventConfig &other) const;
 };
 
 /**
@@ -150,7 +176,7 @@ struct EventConfig {
  * @brief Holds all params for a single video stream
  */
 struct StreamConfig {
-  int                      id;
+  long long                id;
   std::string              url;
   double                   target_fps;
   bool                     wait_for_keyframe;
@@ -165,9 +191,15 @@ struct StreamConfig {
  * @brief Holds the entire app configuration
  */
 struct GlobalConfig {
-  std::string               log_level_str = "INFO";
-  std::vector<StreamConfig> stream_configs;
-  bool                      operator==(const GlobalConfig &other) const;
+  std::string                   log_level_str = "INFO";
+  std::vector<StreamConfig>     stream_configs;
+  int                           instance_slot   = 0;
+  int                           total_instances = 1;
+  int                           max_streams     = 0;
+  std::unordered_set<long long> stream_id_whitelist;
+  bool                          has_stream_whitelist = false;
+
+  bool operator==(const GlobalConfig &other) const;
 };
 
 // **---------- DATA TRANSFER OBJECTS ----------**

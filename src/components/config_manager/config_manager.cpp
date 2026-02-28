@@ -115,6 +115,33 @@ ConfigManager::ConfigManager() {
   } catch (const std::out_of_range &e) {
     throw std::out_of_range("FP_CONFIG_RELOAD_INTERVAL_S is out of range: " + interval_str);
   }
+
+  instance_slot_   = std::stoi(get_env("FP_INSTANCE_SLOT", "0"));
+  total_instances_ = std::stoi(get_env("FP_TOTAL_INSTANCES", "1"));
+  max_streams_     = std::stoi(get_env("FP_MAX_STREAMS", "0"));
+
+  std::string stream_ids_str = get_env("FP_STREAM_IDS", "");
+  if (!stream_ids_str.empty()) {
+    has_stream_whitelist_ = true;
+    size_t pos            = 0;
+    while ((pos = stream_ids_str.find(',')) != std::string::npos) {
+      std::string id_str = stream_ids_str.substr(0, pos);
+      if (!id_str.empty()) {
+        stream_id_whitelist_.insert(std::stoll(id_str));
+      }
+      stream_ids_str.erase(0, pos + 1);
+    }
+    if (!stream_ids_str.empty()) {
+      stream_id_whitelist_.insert(std::stoll(stream_ids_str));
+    }
+  }
+
+  INFO_MSG("ConfigManager: Instance {}/{} | Max streams: {} | Whitelist: {}({})",
+          instance_slot_,
+          total_instances_,
+          max_streams_,
+          has_stream_whitelist_ ? "YES" : "NO",
+          stream_id_whitelist_.size());
 }
 
 ConfigManager::~ConfigManager() {
@@ -324,6 +351,12 @@ bool ConfigManager::parse_config_json(GlobalConfig &config_out) const {
       WARN_MSG("Could not find 'log_level' in config, using default 'INFO'");
       config_out.log_level_str = "INFO";
     }
+    config_out.instance_slot        = instance_slot_;
+    config_out.total_instances      = total_instances_;
+    config_out.max_streams          = max_streams_;
+    config_out.has_stream_whitelist = has_stream_whitelist_;
+    config_out.stream_id_whitelist  = stream_id_whitelist_;
+
     /// Find out the stream array
     simdjson::dom::array streams_arr;
     if (auto err = doc["streams"].get_array().get(streams_arr); err) {
@@ -349,6 +382,24 @@ bool ConfigManager::parse_config_json(GlobalConfig &config_out) const {
         continue;
       }
       cfg.id = id_val;
+
+      /// **------ HORIZONTAL SCALING FILTER ------**
+      if (!is_stream_whitelisted(cfg.id)) {
+        DEBUG_MSG("Skipping stream {}: Not in whitelist", cfg.id);
+        continue;
+      }
+      if (!owns_stream(cfg.id)) {
+        DEBUG_MSG("Skipping stream {}: Not owned by this instance slot ({} / {})",
+                cfg.id,
+                instance_slot_,
+                total_instances_);
+        continue;
+      }
+      if (max_streams_ > 0 &&
+              config_out.stream_configs.size() >= static_cast<size_t>(max_streams_)) {
+        DEBUG_MSG("Skipping stream {}: Max streams reached ({})", cfg.id, max_streams_);
+        continue;
+      }
 
       if (auto err = stream_elem["url"].get_string().get(url_val); err) {
         WARN_MSG("Parse error: stream 'url' is invalid. Skipping stream. Error: {}",
@@ -404,7 +455,7 @@ bool ConfigManager::parse_config_json(GlobalConfig &config_out) const {
           }
 
           int64_t batch_val = 8; ///< Default value
-          event_elem["batch_size"].get_int64().get(batch_val);
+          (void)event_elem["batch_size"].get_int64().get(batch_val);
           event_cfg.batch_size = static_cast<int>(batch_val);
 
           cfg.events.push_back(std::move(event_cfg));

@@ -13,6 +13,7 @@
 #include "stream_io_manager.h"
 
 #include <chrono>
+#include <cmath>
 #include <set>
 #include <sstream>
 
@@ -32,7 +33,40 @@ extern "C" {
 
 using namespace std::chrono_literals;
 
+using namespace std::chrono_literals;
+
 namespace {
+
+/**
+ * @struct ReaderState
+ * @brief State object passed to FFmpeg interrupt callback.
+ */
+struct ReaderState {
+  std::stop_token *st;
+};
+
+/**
+ * @brief FFmpeg interrupt callback to cleanly abort blocking operations.
+ */
+static int check_interrupt(void *ctx) {
+  if (!ctx) return 0;
+  auto *state = static_cast<ReaderState *>(ctx);
+  // Interrupt if a stop request was made.
+  if (state->st && state->st->stop_requested()) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * @brief Returns string describing FFmpeg error code
+ */
+std::string describe_ffmpeg_error(int errnum) {
+  char err_buf[AV_ERROR_MAX_STRING_SIZE] = {0};
+  av_make_error_string(err_buf, AV_ERROR_MAX_STRING_SIZE, errnum);
+  return std::string(err_buf);
+}
+
 bool setup_multi_output_filter_graph(UniqueAVFilterGraph &filter_graph,
         AVFilterContext                                 **buffersrc_ctx,
         std::map<std::string, AVFilterContext *>         &sink_contexts,
@@ -85,12 +119,30 @@ bool setup_multi_output_filter_graph(UniqueAVFilterGraph &filter_graph,
     return false;
   }
 
-  /// Build filter specification: split + fps chains
+  /// Build filter specification: split + select chains
+  /// Use 'select' instead of 'fps' because 'fps' buffers frames and causes memory leaks.
   std::stringstream filter_spec_ss;
   filter_spec_ss << "[in]split=" << events.size();
   for (size_t i = 0; i < events.size(); ++i) filter_spec_ss << "[s" << i << "]";
+
+  double source_fps = 1.0; //< Default fallback
+  if (video_stream->avg_frame_rate.den > 0 && video_stream->avg_frame_rate.num > 0) {
+    source_fps = av_q2d(video_stream->avg_frame_rate);
+  } else if (video_stream->r_frame_rate.den > 0 && video_stream->r_frame_rate.num > 0) {
+    source_fps = av_q2d(video_stream->r_frame_rate);
+  }
+
   for (size_t i = 0; i < events.size(); ++i) {
-    filter_spec_ss << ";[s" << i << "]fps=" << events[i].target_fps << "[sink" << i << "]";
+    double target = events[i].target_fps;
+    if (target <= 0) target = 1.0; //< Safety
+
+    /// Calculate interval (e.g. 30fps / 5fps = 6. Keep 1 in 6 frames)
+    int interval = static_cast<int>(source_fps / target);
+    if (interval < 1) interval = 1;
+
+    /// Use select filter: select='not(mod(n,interval))'
+    /// This keeps frames where n % interval == 0
+    filter_spec_ss << ";[s" << i << "]select='not(mod(n\\," << interval << "))'[sink" << i << "]";
   }
   std::string filter_spec = filter_spec_ss.str();
   INFO_MSG("[Stream {}] Initializing multi-output filter graph with spec: {}",
@@ -121,11 +173,14 @@ bool setup_multi_output_filter_graph(UniqueAVFilterGraph &filter_graph,
 
     /// Set allowed pixel formats for the sink (preferred then end marker)
     AVPixelFormat pix_fmts[] = {preferred, AV_PIX_FMT_NONE};
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     av_opt_set_int_list(sink_ctx,
             "pix_fmts",
             reinterpret_cast<const int *>(pix_fmts),
             AV_PIX_FMT_NONE,
             AV_OPT_SEARCH_CHILDREN);
+#pragma GCC diagnostic pop
 
     sink_contexts[events[i].name] = sink_ctx;
 
@@ -231,125 +286,222 @@ void StreamIoManager::stop_all() {
 
 void StreamIoManager::run_stream(StreamConfig config, std::stop_token st) {
   set_current_thread_name(fmt::format("stream_io_{}", config.id));
-  INFO_MSG("[Stream {}] Thread started for {} event(s).", config.id, config.events.size());
 
-  AVFormatContext *format_context = nullptr;
-  AVDictionary    *options        = nullptr;
-  av_dict_set(&options, "stimeout", "5000000", 0);
-  av_dict_set(&options, "rtsp_transport", "tcp", 0);
-
-  if (avformat_open_input(&format_context, config.url.c_str(), nullptr, &options) != 0) {
-    ERROR_MSG("[Stream {}] Could not open input URL: {}", config.id, config.url);
-    if (options) {
-      av_dict_free(&options);
-    }
-    return;
+  std::string event_names;
+  for (size_t i = 0; i < config.events.size(); ++i) {
+    if (i > 0) event_names += ", ";
+    event_names += config.events[i].name;
   }
-
-  UniqueAVFormatContext ctx_guard(format_context);
-  if (avformat_find_stream_info(ctx_guard.get(), nullptr) < 0) {
-    return;
-  }
-
-  int video_stream_index =
-          av_find_best_stream(ctx_guard.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-  if (video_stream_index < 0) {
-    return;
-  }
-
-  AVStream      *video_stream = ctx_guard->streams[video_stream_index];
-  const AVCodec *codec        = avcodec_find_decoder(video_stream->codecpar->codec_id);
-  if (!codec) {
-    return;
-  }
-
-  UniqueAVCodecContext codec_context(avcodec_alloc_context3(codec));
-  if (!codec_context ||
-          avcodec_parameters_to_context(codec_context.get(), video_stream->codecpar) < 0) {
-    return;
-  }
-  codec_context->thread_count = 1;
-  if (avcodec_open2(codec_context.get(), codec, nullptr) < 0) {
-    return;
-  }
-
-  UniqueAVFilterGraph                      filter_graph;
-  AVFilterContext                         *buffersrc_ctx = nullptr;
-  std::map<std::string, AVFilterContext *> sink_contexts;
-
-  if (!setup_multi_output_filter_graph(
-              filter_graph, &buffersrc_ctx, sink_contexts, video_stream, config.events)) {
-    ERROR_MSG("[Stream {}] Failed to initialize multi-output filter graph.", config.id);
-    return;
-  }
+  INFO_MSG("[Stream {}] Thread started for {} event(s): [{}]",
+          config.id,
+          config.events.size(),
+          event_names);
 
   while (!st.stop_requested()) {
-    UniqueAVPacket packet(av_packet_alloc());
-    if (av_read_frame(ctx_guard.get(), packet.get()) < 0) {
-      WARN_MSG("[Stream {}] av_read_frame failed (EOF or error). Flushing.", config.id);
-      break;
-    }
-    if (packet->stream_index != video_stream_index) continue;
+    UniqueAVFormatContext fmt_ctx_guard(nullptr);
+    ReaderState           reader_state{&st};
 
-    if (avcodec_send_packet(codec_context.get(), packet.get()) == 0) {
-      while (true) {
-        UniqueAVFrame raw_frame(av_frame_alloc());
-        int           ret = avcodec_receive_frame(codec_context.get(), raw_frame.get());
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-        if (ret < 0) break;
+    const int max_retries   = 5; // Configurable default
+    int       current_retry = 0;
+    bool      connected     = false;
 
-        DEBUG_MSG("[Stream {}] Decoded raw frame with size {}x{}",
+    while (!st.stop_requested() && !connected) {
+      AVFormatContext *raw_fmt_ctx = avformat_alloc_context();
+      if (!raw_fmt_ctx) {
+        ERROR_MSG("[Stream {}] Failed to allocate AVFormatContext. Retrying...", config.id);
+        std::this_thread::sleep_for(1s);
+        continue;
+      }
+
+      raw_fmt_ctx->interrupt_callback.callback = check_interrupt;
+      raw_fmt_ctx->interrupt_callback.opaque   = &reader_state;
+
+      AVDictionary *options = nullptr;
+      av_dict_set(&options, "stimeout", "5000000", 0);
+      av_dict_set(&options, "rtsp_transport", "tcp", 0);
+      av_dict_set(&options, "reconnect", "1", 0);
+      av_dict_set(&options, "reconnect_streamed", "1", 0);
+      av_dict_set(&options, "reconnect_at_eof", "1", 0);
+      av_dict_set(&options, "reconnect_delay_max", "10", 0);
+
+      DEBUG_MSG("[Stream {}] Connecting to: {}", config.id, config.url);
+      int ret = avformat_open_input(&raw_fmt_ctx, config.url.c_str(), nullptr, &options);
+
+      if (options) av_dict_free(&options);
+
+      if (ret == 0) {
+        fmt_ctx_guard.reset(raw_fmt_ctx);
+        connected = true;
+        INFO_MSG("[Stream {}] Connected successfully | attempt={}", config.id, current_retry + 1);
+      } else {
+        std::string error_desc = describe_ffmpeg_error(ret);
+        WARN_MSG("[Stream {}] Connection failed: {}. (Attempt {}/{})",
                 config.id,
-                raw_frame->width,
-                raw_frame->height);
+                error_desc,
+                current_retry + 1,
+                max_retries);
+        avformat_free_context(raw_fmt_ctx);
 
-        if (av_buffersrc_add_frame_flags(
-                    buffersrc_ctx, raw_frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF) < 0)
-          break;
+        if (current_retry > max_retries) {
+          long long wait_time = 30;
+          WARN_MSG("[Stream {}] Max retries reached. Sleeping {}s before next cycle.",
+                  config.id,
+                  wait_time);
+          std::mutex       mtx;
+          std::unique_lock lock(mtx);
+          std::condition_variable_any().wait_for(
+                  lock, st, std::chrono::seconds(wait_time), [] { return false; });
+          current_retry = 0;
+        } else {
+          long long        wait_time = static_cast<long long>(std::pow(2, current_retry));
+          std::mutex       mtx;
+          std::unique_lock lock(mtx);
+          std::condition_variable_any().wait_for(
+                  lock, st, std::chrono::seconds(wait_time), [] { return false; });
+          ++current_retry;
+        }
+      }
+    }
 
-        for (const auto &event : config.events) {
-          AVFilterContext *sink_ctx = sink_contexts.at(event.name);
-          while (true) {
-            UniqueAVFrame filtered_frame(av_frame_alloc());
-            int           ret = av_buffersink_get_frame(sink_ctx, filtered_frame.get());
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-            if (ret < 0) break;
+    if (st.stop_requested()) break;
 
-            DecodedFrame output_frame;
-            output_frame.frame         = std::move(filtered_frame);
-            output_frame.source_config = config;
-            output_frame.event_config  = event;
-            output_frame.time_base     = av_buffersink_get_time_base(sink_ctx);
+    if (avformat_find_stream_info(fmt_ctx_guard.get(), nullptr) < 0) {
+      WARN_MSG("[Stream {}] Failed to retrieve stream info. Reconnecting...", config.id);
+      continue;
+    }
 
-            decoded_frame_queue_->push(std::move(output_frame));
+    int video_stream_index =
+            av_find_best_stream(fmt_ctx_guard.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (video_stream_index < 0) {
+      return;
+    }
+
+    AVStream      *video_stream = fmt_ctx_guard->streams[video_stream_index];
+    const AVCodec *codec        = avcodec_find_decoder(video_stream->codecpar->codec_id);
+    if (!codec) {
+      return;
+    }
+
+    UniqueAVCodecContext codec_context(avcodec_alloc_context3(codec));
+    if (!codec_context ||
+            avcodec_parameters_to_context(codec_context.get(), video_stream->codecpar) < 0) {
+      return;
+    }
+    codec_context->thread_count = 1;
+    if (avcodec_open2(codec_context.get(), codec, nullptr) < 0) {
+      return;
+    }
+
+    UniqueAVFilterGraph                      filter_graph;
+    AVFilterContext                         *buffersrc_ctx = nullptr;
+    std::map<std::string, AVFilterContext *> sink_contexts;
+
+    if (!setup_multi_output_filter_graph(
+                filter_graph, &buffersrc_ctx, sink_contexts, video_stream, config.events)) {
+      ERROR_MSG("[Stream {}] Failed to initialize multi-output filter graph.", config.id);
+      return;
+    }
+
+    bool stream_healthy = true;
+    while (!st.stop_requested() && stream_healthy) {
+      UniqueAVPacket packet(av_packet_alloc());
+
+      // Memory optimization: Recycle instead of allocating each loop iteration
+      av_packet_unref(packet.get());
+
+      int read_ret = av_read_frame(fmt_ctx_guard.get(), packet.get());
+      if (read_ret < 0) {
+        if (read_ret != AVERROR_EOF) {
+          WARN_MSG("[Stream {}] Read error: {}. Reconnecting.",
+                  config.id,
+                  describe_ffmpeg_error(read_ret));
+        } else {
+          WARN_MSG("[Stream {}] Reached EOF. Reconnecting.", config.id);
+        }
+        stream_healthy = false;
+        continue;
+      }
+
+      if (packet->stream_index != video_stream_index) continue;
+
+      if (avcodec_send_packet(codec_context.get(), packet.get()) == 0) {
+        while (true) {
+          UniqueAVFrame raw_frame(av_frame_alloc());
+          int           ret = avcodec_receive_frame(codec_context.get(), raw_frame.get());
+          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+          if (ret < 0) {
+            ERROR_MSG("[Stream {}] Failed to receive frame from decoder: {}",
+                    config.id,
+                    describe_ffmpeg_error(ret));
+            stream_healthy = false;
+            break;
+          }
+
+          DEBUG_MSG("[Stream {}] Decoded raw frame with size {}x{}",
+                  config.id,
+                  raw_frame->width,
+                  raw_frame->height);
+
+          int push_ret = av_buffersrc_add_frame_flags(
+                  buffersrc_ctx, raw_frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
+          if (push_ret < 0) {
+            ERROR_MSG("[Stream {}] Filter graph push error: {} (code: {})",
+                    config.id,
+                    describe_ffmpeg_error(push_ret),
+                    push_ret);
+            stream_healthy = false;
+            break;
+          }
+
+          for (const auto &event : config.events) {
+            AVFilterContext *sink_ctx = sink_contexts.at(event.name);
+            while (true) {
+              UniqueAVFrame filtered_frame(av_frame_alloc());
+
+              // For 'select' filter we use AV_BUFFERSINK_FLAG_NO_REQUEST after the first call
+              int pull_ret = av_buffersink_get_frame(sink_ctx, filtered_frame.get());
+              if (pull_ret == AVERROR(EAGAIN) || pull_ret == AVERROR_EOF) break;
+              if (pull_ret < 0) {
+                WARN_MSG("[Stream {}] Sink '{}' error: {}",
+                        config.id,
+                        event.name,
+                        describe_ffmpeg_error(pull_ret));
+                break;
+              }
+
+              DecodedFrame output_frame;
+              output_frame.frame         = std::move(filtered_frame);
+              output_frame.source_config = config;
+              output_frame.event_config  = event;
+              output_frame.time_base     = av_buffersink_get_time_base(sink_ctx);
+
+              decoded_frame_queue_->push(std::move(output_frame));
+            }
           }
         }
       }
     }
-  }
 
-  INFO_MSG("[Stream {}] Flushing remaining frames...", config.id);
-  (void)avcodec_send_packet(codec_context.get(), nullptr);
-  while (true) {
-    UniqueAVFrame raw_frame(av_frame_alloc());
-    if (avcodec_receive_frame(codec_context.get(), raw_frame.get()) < 0) break;
-    (void)av_buffersrc_add_frame(buffersrc_ctx, raw_frame.get());
-  }
-  (void)av_buffersrc_add_frame(buffersrc_ctx, nullptr);
-  for (const auto &event : config.events) {
-    AVFilterContext *sink_ctx = sink_contexts.at(event.name);
-    while (true) {
-      UniqueAVFrame filtered_frame(av_frame_alloc());
-      if (av_buffersink_get_frame(sink_ctx, filtered_frame.get()) < 0) break;
+    // **---- FLUSH FILTER GRAPH BEFORE DESTRUCTION ----**
+    // Prevents internal buffering memory leaks
+    if (buffersrc_ctx && filter_graph) {
+      DEBUG_MSG("[Stream {}] Flushing filter graph...", config.id);
+      (void)av_buffersrc_add_frame(buffersrc_ctx, nullptr);
+      for (const auto &event : config.events) {
+        if (sink_contexts.find(event.name) == sink_contexts.end()) continue;
+        AVFilterContext *sink_ctx = sink_contexts.at(event.name);
+        while (true) {
+          UniqueAVFrame flushed_frame(av_frame_alloc());
+          int           ret = av_buffersink_get_frame(sink_ctx, flushed_frame.get());
+          if (ret == AVERROR_EOF || ret < 0) break;
+        }
+      }
+      DEBUG_MSG("[Stream {}] Filter graph flushed.", config.id);
+    }
 
-      DecodedFrame output_frame;
-      output_frame.frame         = std::move(filtered_frame);
-      output_frame.source_config = config;
-      output_frame.event_config  = event;
-      output_frame.time_base     = av_buffersink_get_time_base(sink_ctx);
-      decoded_frame_queue_->push(std::move(output_frame));
+    if (!st.stop_requested()) {
+      WARN_MSG("[Stream {}] Reconnecting in 500ms...", config.id);
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
   }
-
-  INFO_MSG("[Stream {}] Thread finished.", config.id);
 }

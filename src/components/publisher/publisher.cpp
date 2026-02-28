@@ -251,6 +251,15 @@ void Publisher::publisher_loop(std::stop_token st, int publisher_id) {
   set_current_thread_name(fmt::format("publisher_{}", publisher_id));
   INFO_MSG("Publisher thread {} started.", publisher_id);
 
+  const bool dry_run_mode     = (get_env("FP_PUBLISHER_DRY_RUN", "false") == "true");
+  const int  dry_run_delay_ms = std::stoi(get_env("FP_PUBLISHER_DRY_RUN_DELAY_MS", "10"));
+
+  if (dry_run_mode && publisher_id == 0) {
+    WARN_MSG("Publisher running in DRY-RUN mode: batches will be serialized but NOT sent to Redis! "
+             "Delay: {}ms",
+            dry_run_delay_ms);
+  }
+
   std::unique_ptr<RedisConnection> redis_conn =
           std::make_unique<RedisConnection>(redis_host_, redis_port_);
 
@@ -259,6 +268,15 @@ void Publisher::publisher_loop(std::stop_token st, int publisher_id) {
     if (!batch_opt) break;
 
     FrameBatch batch = std::move(*batch_opt);
+
+    if (dry_run_mode) {
+      DEBUG_MSG("DRY RUN: Publisher {} simulated sending batch for stream {} event '{}'.",
+              publisher_id,
+              batch.stream_id,
+              batch.event_name);
+      std::this_thread::sleep_for(std::chrono::milliseconds(dry_run_delay_ms));
+      continue;
+    }
 
     if (!redis_conn || !redis_conn->is_valid()) {
       redis_conn = std::make_unique<RedisConnection>(redis_host_, redis_port_);
@@ -300,7 +318,7 @@ void Publisher::publisher_loop(std::stop_token st, int publisher_id) {
             static_cast<size_t>(batch.data_buffer.size())));
 
     if (reply == nullptr) {
-      const char *err = ctx->errstr ? ctx->errstr : "(no errstr)";
+      const char *err = (ctx->errstr[0] != '\0') ? ctx->errstr : "(no errstr)";
       ERROR_MSG("Redis XADD command failed for key '{}': {}", redis_key, err);
       redis_conn.reset();
       batch_queue_.push(std::move(batch));

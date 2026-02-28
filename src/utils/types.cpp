@@ -37,6 +37,18 @@ void AVFilterGraphDeleter::operator()(AVFilterGraph *g) const {
   }
 }
 
+void SwsContextDeleter::operator()(SwsContext *s) const {
+  if (s) {
+    sws_freeContext(s);
+  }
+}
+
+void AVCodecParserContextDeleter::operator()(AVCodecParserContext *p) const {
+  if (p) {
+    av_parser_close(p);
+  }
+}
+
 // **---------- EQUALITY OPERATOR IMPLEMENTATIONS ----------**
 
 bool ScaleConfig::operator==(const ScaleConfig &other) const {
@@ -52,7 +64,8 @@ bool ProcessingConfig::operator==(const ProcessingConfig &other) const {
 }
 
 bool EventConfig::operator==(const EventConfig &other) const {
-  return name == other.name && target_fps == other.target_fps && batch_size == other.batch_size;
+  return id == other.id && name == other.name && target_fps == other.target_fps &&
+          batch_size == other.batch_size && processing == other.processing;
 }
 
 bool StreamConfig::operator==(const StreamConfig &other) const {
@@ -61,5 +74,8 @@ bool StreamConfig::operator==(const StreamConfig &other) const {
 }
 
 bool GlobalConfig::operator==(const GlobalConfig &other) const {
-  return log_level_str == other.log_level_str && stream_configs == other.stream_configs;
+  return log_level_str == other.log_level_str && stream_configs == other.stream_configs &&
+          instance_slot == other.instance_slot && total_instances == other.total_instances &&
+          max_streams == other.max_streams && has_stream_whitelist == other.has_stream_whitelist &&
+          stream_id_whitelist == other.stream_id_whitelist;
 }

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "utils/fifo.h"
+#include "utils/frame_saver.h"
 #include "utils/types.h"
 
 extern "C" {
@@ -51,5 +52,6 @@ private:
   std::vector<std::jthread>           workers_;
   std::shared_ptr<fifo<DecodedFrame>> in_queue_;
   std::shared_ptr<fifo<DecodedFrame>> out_queue_;
+  std::shared_ptr<FrameSaver>         frame_saver_;
   int                                 num_threads_;
 };

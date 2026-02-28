@@ -29,6 +29,8 @@ extern "C" {
 #include <libavfilter/buffersrc.h>
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 }
 
 namespace {
@@ -79,8 +81,8 @@ bool create_processing_filter(StreamProcessingContext &context,
           input_frame->width,
           input_frame->height,
           static_cast<int>(input_frame->format),
-          time_base.num,
-          time_base.den,
+          1,
+          1000,
           input_frame->sample_aspect_ratio.num,
           input_frame->sample_aspect_ratio.den);
 
@@ -171,7 +173,28 @@ Worker::Worker(std::shared_ptr<fifo<DecodedFrame>> in_queue,
         int                                        num_threads)
     : in_queue_(std::move(in_queue))
     , out_queue_(std::move(out_queue))
-    , num_threads_(num_threads) {}
+    , frame_saver_(std::make_shared<FrameSaver>())
+    , num_threads_(num_threads) {
+
+  std::string env_level_str = "AV_LOG_ERROR";
+  if (const char *val = std::getenv("FFMPEG_LOG_LEVEL")) env_level_str = val;
+
+  static const std::unordered_map<std::string, int> log_level_map = {{"AV_LOG_QUIET", AV_LOG_QUIET},
+          {"AV_LOG_PANIC", AV_LOG_PANIC},
+          {"AV_LOG_FATAL", AV_LOG_FATAL},
+          {"AV_LOG_ERROR", AV_LOG_ERROR},
+          {"AV_LOG_WARNING", AV_LOG_WARNING},
+          {"AV_LOG_INFO", AV_LOG_INFO},
+          {"AV_LOG_VERBOSE", AV_LOG_VERBOSE},
+          {"AV_LOG_DEBUG", AV_LOG_DEBUG},
+          {"AV_LOG_TRACE", AV_LOG_TRACE}};
+
+  int final_level = AV_LOG_ERROR;
+  if (auto it = log_level_map.find(env_level_str); it != log_level_map.end()) {
+    final_level = it->second;
+  }
+  av_log_set_level(final_level);
+}
 
 Worker::~Worker() {
   stop();
@@ -250,9 +273,9 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
 
   INFO_MSG("Worker thread started.");
 
-  /// Map of stream IDs to their processing contexts
+  /// Map of string (stream_id + event_name) to their processing contexts
   /// This cache allows reuse of filter graphs when possible
-  std::unordered_map<long long, StreamProcessingContext> stream_contexts;
+  std::unordered_map<std::string, StreamProcessingContext> stream_contexts;
 
   while (!st.stop_requested()) {
     auto frame_optional = in_queue_->wait_and_pop();
@@ -260,10 +283,13 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
       break;
     }
 
-    DecodedFrame   d_frame     = std::move(*frame_optional);
-    const AVFrame *input_frame = d_frame.frame.get();
-    const auto    &config      = d_frame.source_config;
-    const auto    &proc_cfg    = config.processing;
+    DecodedFrame      d_frame     = std::move(*frame_optional);
+    const AVFrame    *input_frame = d_frame.frame.get();
+    const auto       &config      = d_frame.source_config;
+    const auto       &proc_cfg    = config.processing;
+    const std::string ctx_key     = fmt::format("{}_{}", config.id, d_frame.event_config.name);
+
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     // **---- Step 1 - Save the initial metadata before any processing. ----**
 
@@ -277,13 +303,8 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
     // **---- Filter Graph Context Management ----**
 
     /// Check if we need to reinitialize the filter graph for this stream.
-    /// A reinitialization is needed when:
-    /// 1. This is the first frame from this stream
-    /// 2. The processing configuration has changed
-    /// 3. The input frame dimensions have changed
-    /// 4. The pixel format has changed
     bool needs_reinit = true;
-    if (auto it = stream_contexts.find(config.id); it != stream_contexts.end()) {
+    if (auto it = stream_contexts.find(ctx_key); it != stream_contexts.end()) {
       auto &ctx = it->second;
       if (ctx.active_config == proc_cfg &&                     //< Same processing settings
               ctx.last_input_width == original_width &&        //< Same frame width
@@ -293,7 +314,9 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
       }
     }
     if (needs_reinit) {
-      INFO_MSG("Worker re-initializing context for Stream ID: {}", config.id);
+      INFO_MSG("Worker re-initializing context for Stream ID: {}, Event: {}",
+              config.id,
+              d_frame.event_config.name);
       StreamProcessingContext new_ctx;
       new_ctx.active_config      = proc_cfg;
       new_ctx.last_input_width   = original_width;
@@ -303,10 +326,10 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
         ERROR_MSG("Failed to create processing filter for Stream ID: {}", config.id);
         continue;
       }
-      stream_contexts[config.id] = std::move(new_ctx);
+      stream_contexts[ctx_key] = std::move(new_ctx);
     }
 
-    auto &context = stream_contexts.at(config.id);
+    auto &context = stream_contexts.at(ctx_key);
 
     // **---- Frame Processing Pipeline ----**
 
@@ -324,12 +347,11 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
     }
 
     /// Step 3: Retrieve and validate processed frames
-    /// The filter graph may output multiple frames for each input frame,
-    /// so we need to pull frames until no more are available.
-    /// Each pulled frame will have the transformations (crop/scale) applied.
-    while (true) {
+    int frames_drained = 0;
+    while (frames_drained < 5) {
       UniqueAVFrame proc_frame(av_frame_alloc());
-      int           ret = av_buffersink_get_frame(context.buffersink_ctx, proc_frame.get());
+      int           flags = (frames_drained == 0) ? 0 : AV_BUFFERSINK_FLAG_NO_REQUEST;
+      int ret = av_buffersink_get_frame_flags(context.buffersink_ctx, proc_frame.get(), flags);
 
       /// EAGAIN means no frames available yet
       /// EOF means filter graph is done
@@ -342,6 +364,8 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
         WARN_MSG("Could not get frame from worker filter for Stream ID: {}", config.id);
         break;
       }
+
+      ++frames_drained;
 
       // **---- NEW: Step 2 - Verify the processed frame and log everything ----**
 
@@ -380,8 +404,23 @@ void Worker::worker_loop(std::stop_token st, int worker_id) {
               .source_config           = d_frame.source_config,
               .event_config            = d_frame.event_config,
               .time_base               = d_frame.time_base};
+
+      if (frame_saver_ && frame_saver_->is_processed_enabled()) {
+        static thread_local uint64_t frames_processed_local = 0;
+        frames_processed_local++;
+        frame_saver_->save_frame(output_frame.frame.get(),
+                d_frame.source_config.id,
+                frames_processed_local,
+                "processed");
+      }
+
       out_queue_->push(std::move(output_frame));
     }
+
+    auto                  end_time = std::chrono::high_resolution_clock::now();
+    [[maybe_unused]] auto duration_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    DEBUG_MSG("[Worker {}] Critical section duration: {} ms", worker_id, duration_ms);
   }
   INFO_MSG("Worker thread finished.");
 }
