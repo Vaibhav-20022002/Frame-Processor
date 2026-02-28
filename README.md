@@ -7,6 +7,8 @@ Designed for reliability and scalability, it employs a supervisor process patter
 ## Key Features
 
 *   **Multi-Stream Ingestion**: Concurrent handling of multiple RTSP video streams.
+*   **Horizontal Scalability**: Run multiple instances safely distributed via consistent hashing & subset filtering.
+*   **Testing & Debugging**: Includes pipeline 'dry-run' toggles for network testing and raw/processed frame disk-saving tools for model verification.
 *   **Dynamic Reconfiguration**: Add, remove, or modify streams and processing rules at runtime without service interruption.
 *   **High-Performance Processing**:
     *   Efficient thread pooling for parallel frame processing.
@@ -92,6 +94,13 @@ The application is configured via a JSON file and environment variables.
 | `FP_REDIS_QUEUE_BASE_NAME` | Base name for Redis Stream keys. | `fp_batches` |
 | `FP_NUM_WORKER_THREADS` | Number of processing threads. | `CPU Cores - 2` |
 | `FP_PUBLISHER_THREADS` | Number of concurrent Redis publisher threads. | `4` |
+| `FP_INSTANCE_SLOT` | Instance slot for horizontal scaling (e.g. `0`). | `0` |
+| `FP_TOTAL_INSTANCES` | Total configured instances for horizontal scaling. | `1` |
+| `FP_STREAM_IDS` | Comma-separated allowlist of stream IDs to process exclusively. | `""` |
+| `FP_PUBLISHER_DRY_RUN` | Skips Redis I/O but simulates latency for testing backpressure. | `false` |
+| `FP_SAVE_DECODED_FRAMES` | Saves raw decoded frames to disk prior to processing. | `false` |
+| `FP_SAVE_PROCESSED_FRAMES` | Saves finalized processed frames to disk for inspection. | `false` |
+| `FP_SAVED_FRAMES_OUTPUT_DIR` | Base output directory for saved frames. | `/tmp/output` |
 
 ### Configuration File (`config.json`)
 
@@ -159,3 +168,4 @@ The `data` blob consists of concatenated frames. Each frame in the batch has the
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
